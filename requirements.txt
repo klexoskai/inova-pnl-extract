@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+pandas
+openpyxl
+country_converter
+pydantic-settings
+msal
+requests
+snowflake-connector-python[pandas]

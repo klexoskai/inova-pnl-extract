@@ -1,0 +1,26 @@
+{
+  "description": "iGate Key Metrics (005): two rectangular ranges on one sheet",
+  "sheet_name": "iGate Key Metrics (005)",
+  "sheet_name_aliases": [],
+  "excel": {
+    "engine": "openpyxl"
+  },
+  "tables": [
+    {
+      "id": "C5_D38",
+      "start_cell": "C5",
+      "end_cell": "D38",
+      "header_row": false
+    },
+    {
+      "id": "F4_J38",
+      "start_cell": "F4",
+      "end_cell": "J38",
+      "header_row": true
+    }
+  ],
+  "walk": {
+    "extensions": [".xlsx", ".xls", ".xlsm"],
+    "ignore_filename_prefix": "~"
+  }
+}

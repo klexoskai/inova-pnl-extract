@@ -1,0 +1,43 @@
+{
+  "excel": {
+    "engine": "openpyxl"
+  },
+  "sheet_name": "Project Summary",
+  "sheet_name_aliases": [],
+  "list_price_table": {
+    "start_cell": "C3",
+    "end_cell": "AI14",
+    "header_row": true
+  },
+  "clean_list_price": {
+    "column_name_substring": "List Price",
+    "exclude_rows_value_contains": "input"
+  },
+  "melt": {
+    "id_var_column": "List Price",
+    "var_name": "Market",
+    "value_name": "list_price_AUD",
+    "sku_market_separator": "_"
+  },
+  "rename_columns": {
+    "Sku_Market": "sku_name"
+  },
+  "feature_tables": [
+    { "field_name": "forecast_volume_y1", "start_cell": "BW2", "end_cell": "DC15" },
+    { "field_name": "forecast_volume_y2", "start_cell": "BW17", "end_cell": "DC30" },
+    { "field_name": "forecast_volume_y3", "start_cell": "BW32", "end_cell": "DC45" },
+    { "field_name": "forecast_net_sales_y1", "start_cell": "HD2", "end_cell": "IJ15" },
+    { "field_name": "forecast_net_sales_y2", "start_cell": "HD17", "end_cell": "IJ30" },
+    { "field_name": "forecast_net_sales_y3", "start_cell": "HD32", "end_cell": "IJ45" },
+    { "field_name": "launchyr_coop_listingfees_y1", "start_cell": "FV2", "end_cell": "HB15" },
+    { "field_name": "launchyr_coop_listingfees_y2", "start_cell": "FV17", "end_cell": "HB30" },
+    { "field_name": "launchyr_coop_listingfees_y3", "start_cell": "FV32", "end_cell": "HB45" },
+    { "field_name": "one_time_costs_y1", "start_cell": "LC2", "end_cell": "MI15" },
+    { "field_name": "one_time_costs_y2", "start_cell": "LC17", "end_cell": "MI30" },
+    { "field_name": "one_time_costs_y3", "start_cell": "LC32", "end_cell": "MI45" }
+  ],
+  "walk": {
+    "extensions": [".xlsx", ".xls", ".xlsm"],
+    "ignore_filename_prefix": "~"
+  }
+}
