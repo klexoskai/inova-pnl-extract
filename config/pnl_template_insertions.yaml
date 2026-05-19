@@ -1,0 +1,229 @@
+# Declarative insertions: sheet → how to read values from extractions data → where to write in the workbook.
+# Runner (e.g. apply_insertions.py) not included yet — extend this file as you add insertions.
+#
+# Conventions (intended for a future runner):
+# - `source` describes how to build a list/array of values from a pandas DataFrame (typically extractions.csv).
+# - `target` describes how those values map to cells.
+# - `length` / `length_ref` ties one insertion’s row count to another (e.g. prices aligned to unique SKU count).
+#
+# Suggested `source.type` values to implement later:
+#   column_unique          — unique values, first-appearance order (pandas .dropna().unique())
+#   column_iloc_from_top   — iloc[0:n] from top; n from length block
+#   columns_iloc_from_top  — multiple columns, same row iloc[0:n] for each
+#   column_first_per_key   — first row per key column (groupby); for later use
+# Suggested `target.type` values:
+#   column_fill            — one column, consecutive rows from start_row
+#   fixed_cells            — list of { row, col } or { row, column } entries
+#   anchored_column        — one column, explicit row list; optional clear_unused for extra anchors
+#   anchored_row_block     — multiple columns on same row anchors (row_start + i*row_step)
+#   anchored_row_repeat    — one source value per anchor row, repeated across multiple target columns
+#   table_block            — write ordered columns from a CSV: optional header row from source, then data rows (see data_csv)
+
+version: 1
+
+# Master blank template path: config/pnl_pipeline.json (used by notebook + apply_new_format_insertions.py)
+
+defaults:
+  # Path to CSV relative to notebook cwd unless absolute. Override per-insertion if needed.
+  data_csv: extractions.csv
+  # Column whose unique count (after dropna) drives “how many values” for anchored / iloc insertions.
+  length_ref_column: sku_name.1
+  # On sku-block sheets (SP, VOL_Auto, …): launch_year_Q → K=year, L=first month of quarter.
+  launch_date:
+    source_column: launch_year_Q
+    year_column: K
+    month_column: L
+
+insertions:
+  - id: sku_names_home_tab
+    enabled: true
+    description: Unique sku_name.1 values into Home Tab column J from row 6 downward.
+    sheet: Home Tab
+    source:
+      type: column_unique
+      column: sku_name.1
+      dropna: true
+    target:
+      type: column_fill
+      column: J
+      start_row: 6
+
+  - id: list_price_sp_ai_anchors
+    enabled: true
+    description: >-
+      SP: sku blocks (8, 23, …); per market row C=Market, AI=list_price_AUD
+      (same layout as VOL_Auto).
+    sheet: SP
+    source:
+      type: dataframe_rows_by_sku_markets
+      sku_column: sku_name.1
+      columns:
+        - Market
+        - list_price_AUD
+    target:
+      type: sku_block_consecutive_rows
+      first_row: 8
+      row_step: 15
+      last_row: 143
+      max_sku_blocks: 10
+      market_column: C
+      value_columns: [AI]
+      launch_date: true
+
+  - id: forecast_volumes_vol_auto
+    enabled: true
+    description: >-
+      VOL_Auto grouped by product sku_name (sku_name.1). For each SKU, filter all markets
+      and write consecutive rows from base 8 + 15*sku_index (e.g. Blackcurrant 16 → 8–9,
+      Blackcurrant 32 → 23–24). Column C = Market; AQ:AU = forecast_volume_y1..y5.
+    sheet: VOL_Auto
+    source:
+      type: dataframe_rows_by_sku_markets
+      sku_column: sku_name.1
+      columns:
+        - Market
+        - forecast_volume_y1
+        - forecast_volume_y2
+        - forecast_volume_y3
+        - forecast_volume_y4
+        - forecast_volume_y5
+    target:
+      type: sku_block_consecutive_rows
+      first_row: 8
+      row_step: 15
+      last_row: 143
+      max_sku_blocks: 10
+      market_column: C
+      value_columns: [AQ, AR, AS, AT, AU]
+      launch_date: true
+
+  - id: gtn_sales_ded_td
+    enabled: true
+    description: >-
+      SALES_DED_TD: sku blocks; per market row C=Market; GTN % repeated on BA/BN/CA/CN/DA/DN.
+    sheet: SALES_DED_TD
+    source:
+      type: dataframe_rows_by_sku_markets
+      sku_column: sku_name.1
+      columns:
+        - Market
+        - GTN_perc excluding Launch yr one-time costs
+    target:
+      type: sku_block_consecutive_rows
+      first_row: 8
+      row_step: 15
+      last_row: 143
+      max_sku_blocks: 10
+      market_column: C
+      value_columns: [BA, BN, CA, CN, DA, DN]
+      repeat_value: true
+      launch_date: true
+
+  - id: cogs_other_combined_block
+    enabled: true
+    description: >-
+      COGS_OTHER: sku blocks; per market row C=Market; AK:AO = COGS_other_combined_y1..y5.
+    sheet: COGS_OTHER
+    source:
+      type: dataframe_rows_by_sku_markets
+      sku_column: sku_name.1
+      columns:
+        - Market
+        - COGS_other_combined_y1
+        - COGS_other_combined_y2
+        - COGS_other_combined_y3
+        - COGS_other_combined_y4
+        - COGS_other_combined_y5
+    target:
+      type: sku_block_consecutive_rows
+      first_row: 8
+      row_step: 15
+      last_row: 143
+      max_sku_blocks: 10
+      market_column: C
+      value_columns: [AK, AL, AM, AN, AO]
+      launch_date: true
+
+  - id: cogs_sheet_repeat #HIGH PERC
+    enabled: true
+    description: >-
+      COGS: sku blocks; per market row C=Market; COGS/unit repeated on BA/BN/CA/CN/DA/DN.
+    sheet: COGS
+    source:
+      type: dataframe_rows_by_sku_markets
+      sku_column: sku_name.1
+      columns:
+        - Market
+        - COGS/unit
+    target:
+      type: sku_block_consecutive_rows
+      first_row: 8
+      row_step: 15
+      last_row: 143
+      max_sku_blocks: 10
+      market_column: C
+      value_columns: [BA, BN, CA, CN, DA, DN]
+      repeat_value: true
+      launch_date: true
+
+  - id: launch_cost_sales_ded_ka
+    enabled: true
+    description: >-
+      SALES_DED_KA: sku blocks; per market row C=Market; AK = launch one-time cost.
+    sheet: SALES_DED_KA
+    source:
+      type: dataframe_rows_by_sku_markets
+      sku_column: sku_name.1
+      columns:
+        - Market
+        - Launch Yr one-time cost (Listing fees, launch COOP)
+    target:
+      type: sku_block_consecutive_rows
+      first_row: 8
+      row_step: 15
+      last_row: 143
+      max_sku_blocks: 10
+      market_column: C
+      value_columns: [AK]
+      launch_date: true
+
+  - id: anp_table_from_extractions_proj
+    enabled: true
+    description: >-
+      Market-level ANP % of Net Sales (Years 1–5) from extractions_proj.csv;
+      columns Market + five year fields map to B4:G4 for the first row, B5:G5 for the second, etc.
+      (CSV header is parsed by pandas only; all dataframe rows are written.) Column names from the CSV are not written into the sheet.
+    data_csv: extractions_proj.csv
+    sheet: A&P TABLE
+    source:
+      type: dataframe_columns_in_order
+      columns:
+        - Market
+        - ANP_perc of Net Sales_Year 1
+        - ANP_perc of Net Sales_Year 2
+        - ANP_perc of Net Sales_Year 3
+        - ANP_perc of Net Sales_Year 4
+        - ANP_perc of Net Sales_Year 5
+    target:
+      type: table_block
+      first_data_row: 4
+      start_column: B
+      write_header_from_source: false
+
+  # --- Add more insertions below (copy/paste skeleton) ---
+  # - id: example_next_insertion
+  #   enabled: true
+  #   description: ""
+  #   sheet: SheetName
+  #   source:
+  #     type: column_unique   # or column_iloc_from_top, etc.
+  #     column: some_column
+  #     dropna: true
+  #     # length:              # only when source needs a max row count
+  #     #   type: unique_count
+  #     #   column: sku_name.1
+  #     #   dropna: true
+  #   target:
+  #     type: column_fill      # or anchored_column, fixed_cells
+  #     column: A
+  #     start_row: 10

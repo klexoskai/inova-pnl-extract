@@ -2,8 +2,10 @@ fastapi
 uvicorn[standard]
 pandas
 openpyxl
+xlwings
 country_converter
 pydantic-settings
 msal
 requests
 snowflake-connector-python[pandas]
+tqdm

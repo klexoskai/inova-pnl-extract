@@ -1,5 +1,7 @@
 # P&L Extract FastAPI Service
 
+For the **old-format → CSV → new-format template** pipeline (field-level extraction and insertion map), see [docs/PNL_EXTRACTION_AND_INSERTION.md](docs/PNL_EXTRACTION_AND_INSERTION.md).
+
 FastAPI service that:
 - reads Excel files from a SharePoint folder (via Microsoft Graph),
 - runs the P&L extraction logic from the notebook,
