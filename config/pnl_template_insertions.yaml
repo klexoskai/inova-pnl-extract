@@ -48,6 +48,20 @@ insertions:
       column: J
       start_row: 6
 
+  - id: home_tab_base_currency_c6
+    enabled: true
+    description: >-
+      Home Tab C6 = base currency; always written as AUD (replaces any existing value).
+      Implemented in insert_template.py.
+    sheet: Home Tab
+    source:
+      type: fixed_literal
+      value: AUD
+    target:
+      type: fixed_cell
+      column: C
+      row: 6
+
   - id: list_price_sp_ai_anchors
     enabled: true
     description: >-
@@ -147,7 +161,7 @@ insertions:
   - id: cogs_sheet_repeat #HIGH PERC
     enabled: true
     description: >-
-      COGS: sku blocks; per market row C=Market; COGS/unit repeated on BA/BN/CA/CN/DA/DN.
+      COGS: sku blocks; per market row C=Market; AK = COGS/unit.
     sheet: COGS
     source:
       type: dataframe_rows_by_sku_markets
@@ -162,8 +176,7 @@ insertions:
       last_row: 143
       max_sku_blocks: 10
       market_column: C
-      value_columns: [BA, BN, CA, CN, DA, DN]
-      repeat_value: true
+      value_columns: [AK]
       launch_date: true
 
   - id: launch_cost_sales_ded_ka
@@ -187,6 +200,24 @@ insertions:
       value_columns: [AK]
       launch_date: true
 
+  - id: ap_alloc_unique_markets_column_x
+    enabled: true
+    description: >-
+      A&P ALLOC: sku blocks same as VOL; column X only — unique Market per SKU (first-seen
+      order within each SKU), consecutive rows from 8 + 15*sku_index (X8,X9 … X23,X24 …).
+      Implemented in insert_template.py.
+    sheet: A&P ALLOC
+    source:
+      type: sku_block_unique_markets_column
+      sku_column: sku_name.1
+      column: Market
+    target:
+      type: sku_block_column_fill
+      column: X
+      first_row: 8
+      row_step: 15
+      last_row: 143
+
   - id: anp_table_from_extractions_proj
     enabled: true
     description: >-
@@ -209,6 +240,63 @@ insertions:
       first_data_row: 4
       start_column: B
       write_header_from_source: false
+
+  - id: capex_sheet_ak_from_proj
+    enabled: true
+    description: >-
+      CAPEX sheet: extractions_proj column "CAPEX_CAPEX $" into AK8, AK9, … consecutive
+      (not sku-block stepped). Implemented in insert_template.py.
+    data_csv: extractions_proj.csv
+    sheet: CAPEX
+    source:
+      type: dataframe_column
+      column: "CAPEX_CAPEX $"
+    target:
+      type: column_fill
+      column: AK
+      start_row: 8
+
+  - id: cannibal_sheet_from_extractions_proj
+    enabled: true
+    description: >-
+      CANNIBAL: sku blocks; markets from extractions per SKU; canni_perc_y1..y5 → BA/BB/BC/BD/BE,
+      canni_GP_perc → CANNIBAL_REV!AI; values from extractions_proj by Market. insert_template.py.
+    data_csv: extractions_proj.csv
+    sheet: CANNIBAL
+    source:
+      type: sku_block_proj_by_market
+      sku_column: sku_name.1
+      market_column: Market
+      columns:
+        - canni_perc_y1
+        - canni_perc_y2
+        - canni_perc_y3
+        - canni_perc_y4
+        - canni_perc_y5
+        - canni_GP_perc
+    target:
+      type: sku_block_consecutive_rows
+      first_row: 8
+      row_step: 15
+      last_row: 143
+      value_columns: [BA, BB, BC, BD, BE]
+      gp_column: { sheet: CANNIBAL_REV, column: AI }
+
+  - id: home_tab_unique_markets_column_i
+    enabled: true
+    description: >-
+      Home Tab: unique Market from extractions_proj (order = first CSV appearance)
+      into column I starting at row 19 (I19, I20, …). Implemented in insert_template.py.
+    data_csv: extractions_proj.csv
+    sheet: Home Tab
+    source:
+      type: column_unique
+      column: Market
+      dropna: true
+    target:
+      type: column_fill
+      column: I
+      start_row: 19
 
   # --- Add more insertions below (copy/paste skeleton) ---
   # - id: example_next_insertion

@@ -5,6 +5,9 @@ from .extract_sku import extract_sku_summary, extract_sku_summary_directory, pre
 from .insert_template import (
     apply_insertions_to_workbook,
     parse_launch_year_q,
+    write_ap_alloc_markets_column_x,
+    write_capex_sheet_ak_from_proj,
+    write_cannibal_sheet_from_proj,
     write_cogs_other_combined,
     write_cogs_unit,
     write_sales_ded_ka_launch,
@@ -29,4 +32,7 @@ __all__ = [
     "write_cogs_unit",
     "write_cogs_other_combined",
     "write_sales_ded_ka_launch",
+    "write_ap_alloc_markets_column_x",
+    "write_capex_sheet_ak_from_proj",
+    "write_cannibal_sheet_from_proj",
 ]

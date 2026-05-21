@@ -44,6 +44,16 @@ ANP_PROJ_COLS = [
     "ANP_perc of Net Sales_Year 5",
 ]
 
+# Home Tab: unique Market names from extractions_proj (column order = first CSV appearance)
+HOME_TAB_UNIQUE_MARKET_COL = "I"
+HOME_TAB_UNIQUE_MARKET_START_ROW = 19
+HOME_TAB_UNIQUE_MARKET_CLEAR_ROWS = 80
+
+# Home Tab: base currency (template label "base currency" area)
+HOME_TAB_BASE_CURRENCY_COL = "C"
+HOME_TAB_BASE_CURRENCY_ROW = 6
+HOME_TAB_BASE_CURRENCY_VALUE = "AUD"
+
 FORECAST_COLS = [
     "forecast_volume_y1",
     "forecast_volume_y2",
@@ -60,6 +70,26 @@ LAUNCH_COL = "Launch Yr one-time cost (Listing fees, launch COOP)"
 DED_COL_LETTERS = ["BA", "BN", "CA", "CN", "DA", "DN"]
 VOL_COL_LETTERS = ["AQ", "AR", "AS", "AT", "AU"]
 COGS_OTHER_COL_LETTERS = ["AK", "AL", "AM", "AN", "AO"]
+
+# A&P ALLOC: same sku-block geometry as VOL/COGS/etc.; column X = unique Market per SKU block
+AP_ALLOC_SHEET_NAME = "A&P ALLOC"
+AP_ALLOC_MARKET_COL_X = "X"
+
+# CAPEX: project-level $ amounts (not repeated per sku block); one column, consecutive rows
+CAPEX_SHEET_NAME = "CAPEX"
+CAPEX_PROJ_VALUE_COL = "CAPEX_CAPEX $"  # pivoted column from extract_proj (row label "CAPEX $" in source)
+CAPEX_VALUE_COL_AK = "AK"
+CAPEX_VALUE_START_ROW = 8
+CAPEX_AK_CLEAR_ROWS = 120
+
+# CANNIBAL: sku-block rows; year % → BA/BB/BC/BD/BE (feeds CANNIBAL_REV GA:GE via BA:BE).
+CANNIBAL_SHEET_NAME = "CANNIBAL"
+CANNIBAL_REV_SHEET_NAME = "CANNIBAL_REV"
+CANNI_PERC_PROJ_COLS = [f"canni_perc_y{y}" for y in range(1, 6)]
+CANNI_YEAR_COL_LETTERS = ["BA", "BB", "BC", "BD", "BE"]
+CANNI_GP_PROJ_COL = "canni_GP_perc"
+CANNI_GP_REV_COL_LETTER = "AI"  # CANNIBAL_REV!$AI$n multiplies GA:GE revenue formulas
+CANNI_CLEAR_COL_LETTERS = list(CANNI_YEAR_COL_LETTERS)
 
 
 def resolve_product_sku_column(df: pd.DataFrame) -> str:
@@ -86,6 +116,19 @@ def _require_columns(df: pd.DataFrame, columns: Iterable[str], label: str) -> No
     missing = [c for c in columns if c not in df.columns]
     if missing:
         raise KeyError(f"{label} missing columns: {missing!r}")
+
+
+def _numeric_for_excel_cell(value: Any) -> int | float | None:
+    """Coerce to int/float for openpyxl, or None if missing / non-numeric."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    n = pd.to_numeric(value, errors="coerce")
+    if pd.isna(n):
+        return None
+    f = float(n)
+    if f.is_integer():
+        return int(f)
+    return f
 
 
 def parse_launch_year_q(value: Any) -> tuple[int | None, str | None]:
@@ -243,13 +286,12 @@ def write_sales_ded_td_gtn(ws, extractions: pd.DataFrame) -> int:
 
 
 def write_cogs_unit(ws, extractions: pd.DataFrame) -> int:
-    """COGS: COGS/unit repeated across BA/BN/CA/CN/DA/DN per market row."""
+    """COGS: AK = COGS/unit per sku×market row."""
     return write_sku_block_sheet(
         ws,
         extractions,
         data_columns=[COGS_COL],
-        value_col_letters=DED_COL_LETTERS,
-        repeat_value=True,
+        value_col_letters=["AK"],
         sheet_label="COGS",
     )
 
@@ -274,6 +316,229 @@ def write_sales_ded_ka_launch(ws, extractions: pd.DataFrame) -> int:
         value_col_letters=["AK"],
         sheet_label="SALES_DED_KA",
     )
+
+
+def write_ap_alloc_markets_column_x(ws, extractions: pd.DataFrame) -> int:
+    """
+    A&P ALLOC: column **X** uses the same sku-block anchors as other tabs (rows 8, 23, …).
+
+    Per product SKU, writes **unique** ``Market`` values (first-seen order within that SKU)
+    down consecutive rows: e.g. SKU 0 → X8:X…, SKU 1 → X23:X….
+    """
+    sku_col = resolve_product_sku_column(extractions)
+    _require_columns(extractions, ["Market", sku_col], "extractions")
+
+    x_col_idx = column_index_from_string(AP_ALLOC_MARKET_COL_X)
+    for row in range(SKU_BLOCK_FIRST_ROW, SKU_BLOCK_LAST_ROW + 1):
+        ws.cell(row=row, column=x_col_idx, value=None)
+
+    unique_skus = list(extractions[sku_col].dropna().unique())
+    written = 0
+    for sku_idx, sku in enumerate(unique_skus):
+        if sku_idx >= MAX_SKU_SLOTS:
+            log.warning(
+                "%s: %d SKUs exceed %d blocks; skipping SKU %r and later",
+                AP_ALLOC_SHEET_NAME,
+                len(unique_skus),
+                MAX_SKU_SLOTS,
+                sku,
+            )
+            break
+        base_row = SKU_BLOCK_FIRST_ROW + SKU_BLOCK_ROW_STEP * sku_idx
+        sku_rows = extractions.loc[extractions[sku_col] == sku]
+        series = sku_rows["Market"].drop_duplicates()
+        markets_list: list[Any] = []
+        for m in series.tolist():
+            if m is None or (isinstance(m, float) and pd.isna(m)):
+                continue
+            s = str(m).strip()
+            if not s or s.lower() == "nan":
+                continue
+            markets_list.append(m)
+
+        for market_offset, market in enumerate(markets_list):
+            excel_row = base_row + market_offset
+            if excel_row > SKU_BLOCK_LAST_ROW:
+                log.warning(
+                    "%s: SKU %r market rows exceed row %d; skipping remainder",
+                    AP_ALLOC_SHEET_NAME,
+                    sku,
+                    SKU_BLOCK_LAST_ROW,
+                )
+                break
+            ws.cell(row=excel_row, column=x_col_idx, value=market)
+            written += 1
+
+    log.info(
+        "%s: wrote %d Market cell(s) to column %s (sku-block layout)",
+        AP_ALLOC_SHEET_NAME,
+        written,
+        AP_ALLOC_MARKET_COL_X,
+    )
+    return written
+
+
+def write_capex_sheet_ak_from_proj(ws, extractions_proj: pd.DataFrame) -> int:
+    """
+    CAPEX sheet: write ``CAPEX_CAPEX $`` from ``extractions_proj`` into column **AK**
+    starting at row **8** (**AK8**, **AK9**, …) — one row per DataFrame row, **not** sku-block stepped.
+    """
+    if CAPEX_PROJ_VALUE_COL not in extractions_proj.columns:
+        log.warning(
+            "extractions_proj has no %r — skipped %s sheet column %s",
+            CAPEX_PROJ_VALUE_COL,
+            CAPEX_SHEET_NAME,
+            CAPEX_VALUE_COL_AK,
+        )
+        return 0
+
+    ak_idx = column_index_from_string(CAPEX_VALUE_COL_AK)
+    for off in range(CAPEX_AK_CLEAR_ROWS):
+        ws.cell(row=CAPEX_VALUE_START_ROW + off, column=ak_idx, value=None)
+
+    written = 0
+    for i, (_, row_s) in enumerate(extractions_proj.iterrows()):
+        if i >= CAPEX_AK_CLEAR_ROWS:
+            log.warning(
+                "%s: more than %d extractions_proj rows; truncating column %s",
+                CAPEX_SHEET_NAME,
+                CAPEX_AK_CLEAR_ROWS,
+                CAPEX_VALUE_COL_AK,
+            )
+            break
+        excel_row = CAPEX_VALUE_START_ROW + i
+        ws.cell(
+            row=excel_row,
+            column=ak_idx,
+            value=_numeric_for_excel_cell(row_s[CAPEX_PROJ_VALUE_COL]),
+        )
+        written += 1
+
+    log.info(
+        "%s: wrote %d value(s) to %s%d+ from %r",
+        CAPEX_SHEET_NAME,
+        written,
+        CAPEX_VALUE_COL_AK,
+        CAPEX_VALUE_START_ROW,
+        CAPEX_PROJ_VALUE_COL,
+    )
+    return written
+
+
+def _proj_rows_by_market(extractions_proj: pd.DataFrame) -> dict[str, pd.Series]:
+    """Map stripped Market name → row (Series) in extractions_proj."""
+    lookup: dict[str, pd.Series] = {}
+    if "Market" not in extractions_proj.columns:
+        return lookup
+    for _, row in extractions_proj.iterrows():
+        m = row["Market"]
+        if m is None or (isinstance(m, float) and pd.isna(m)):
+            continue
+        key = str(m).strip()
+        if key:
+            lookup[key] = row
+    return lookup
+
+
+def write_cannibal_sheet_from_proj(
+    ws,
+    extractions: pd.DataFrame,
+    extractions_proj: pd.DataFrame,
+    ws_rev=None,
+) -> int:
+    """
+    CANNIBAL: per sku block (8, 23, …), consecutive market rows from ``extractions``;
+    values from ``extractions_proj`` by ``Market``.
+
+    - ``canni_perc_y1`` … ``y5`` → **BA, BB, BC, BD, BE**
+    - ``canni_GP_perc`` → **CANNIBAL_REV!AI**
+    """
+    required = ["Market", *CANNI_PERC_PROJ_COLS, CANNI_GP_PROJ_COL]
+    missing = [c for c in required if c not in extractions_proj.columns]
+    if missing:
+        log.warning(
+            "extractions_proj missing %r — skipped %s sheet",
+            missing,
+            CANNIBAL_SHEET_NAME,
+        )
+        return 0
+
+    sku_col = resolve_product_sku_column(extractions)
+    _require_columns(extractions, ["Market", sku_col], "extractions")
+
+    year_col_indices = [column_index_from_string(letter) for letter in CANNI_YEAR_COL_LETTERS]
+    gp_rev_col_idx = column_index_from_string(CANNI_GP_REV_COL_LETTER)
+    clear_col_indices = [column_index_from_string(letter) for letter in CANNI_CLEAR_COL_LETTERS]
+
+    for row in range(SKU_BLOCK_FIRST_ROW, SKU_BLOCK_LAST_ROW + 1):
+        for col_idx in clear_col_indices:
+            ws.cell(row=row, column=col_idx, value=None)
+
+    proj_by_market = _proj_rows_by_market(extractions_proj)
+    unique_skus = list(extractions[sku_col].dropna().unique())
+    written = 0
+
+    for sku_idx, sku in enumerate(unique_skus):
+        if sku_idx >= MAX_SKU_SLOTS:
+            log.warning(
+                "%s: %d SKUs exceed %d blocks; skipping SKU %r and later",
+                CANNIBAL_SHEET_NAME,
+                len(unique_skus),
+                MAX_SKU_SLOTS,
+                sku,
+            )
+            break
+        base_row = SKU_BLOCK_FIRST_ROW + SKU_BLOCK_ROW_STEP * sku_idx
+        sku_rows = extractions.loc[extractions[sku_col] == sku]
+        markets_series = sku_rows["Market"].drop_duplicates()
+        markets_list: list[str] = []
+        for m in markets_series.tolist():
+            if m is None or (isinstance(m, float) and pd.isna(m)):
+                continue
+            s = str(m).strip()
+            if not s or s.lower() == "nan":
+                continue
+            markets_list.append(s)
+
+        for market_offset, market in enumerate(markets_list):
+            excel_row = base_row + market_offset
+            if excel_row > SKU_BLOCK_LAST_ROW:
+                log.warning(
+                    "%s: SKU %r market rows exceed row %d; skipping remainder",
+                    CANNIBAL_SHEET_NAME,
+                    sku,
+                    SKU_BLOCK_LAST_ROW,
+                )
+                break
+            proj_row = proj_by_market.get(market)
+            if proj_row is None:
+                log.warning(
+                    "%s: no extractions_proj row for Market %r (SKU %r row %d)",
+                    CANNIBAL_SHEET_NAME,
+                    market,
+                    sku,
+                    excel_row,
+                )
+                continue
+            for j, col_idx in enumerate(year_col_indices):
+                ws.cell(row=excel_row, column=col_idx, value=proj_row[CANNI_PERC_PROJ_COLS[j]])
+            if ws_rev is not None:
+                ws_rev.cell(
+                    row=excel_row,
+                    column=gp_rev_col_idx,
+                    value=proj_row[CANNI_GP_PROJ_COL],
+                )
+            written += 1
+
+    gp_target = f"{CANNIBAL_REV_SHEET_NAME}!{CANNI_GP_REV_COL_LETTER}" if ws_rev is not None else "(skipped)"
+    log.info(
+        "%s: wrote %d market row(s) (cols %s; GP → %s) from extractions_proj",
+        CANNIBAL_SHEET_NAME,
+        written,
+        ",".join(CANNI_YEAR_COL_LETTERS),
+        gp_target,
+    )
+    return written
 
 
 def apply_insertions_to_workbook(
@@ -307,6 +572,18 @@ def apply_insertions_to_workbook(
         )
 
     ws_home = wb["Home Tab"]
+    ws_home.cell(
+        row=HOME_TAB_BASE_CURRENCY_ROW,
+        column=column_index_from_string(HOME_TAB_BASE_CURRENCY_COL),
+        value=HOME_TAB_BASE_CURRENCY_VALUE,
+    )
+    log.info(
+        "Home Tab: set base currency to %r at %s%s",
+        HOME_TAB_BASE_CURRENCY_VALUE,
+        HOME_TAB_BASE_CURRENCY_COL,
+        HOME_TAB_BASE_CURRENCY_ROW,
+    )
+
     for i, val in enumerate(unique_skus[:MAX_SKU_SLOTS]):
         ws_home.cell(row=6 + i, column=column_index_from_string("J"), value=val)
 
@@ -317,6 +594,8 @@ def apply_insertions_to_workbook(
     write_cogs_other_combined(wb["COGS_OTHER"], extractions)
     write_sales_ded_ka_launch(wb["SALES_DED_KA"], extractions)
 
+    write_ap_alloc_markets_column_x(wb[AP_ALLOC_SHEET_NAME], extractions)
+
     if extractions_proj is not None and not extractions_proj.empty:
         _require_columns(extractions_proj, ANP_PROJ_COLS, "extractions_proj")
         ws_ap = wb["A&P TABLE"]
@@ -325,6 +604,36 @@ def apply_insertions_to_workbook(
             excel_row = 4 + i
             for j, col_name in enumerate(ANP_PROJ_COLS):
                 ws_ap.cell(row=excel_row, column=start_col + j, value=row_s[col_name])
+
+        # Unique Market (first-appearance order) → Home Tab column I from row 19 downward
+        markets_u = extractions_proj["Market"].drop_duplicates()
+        markets_u = [
+            m for m in markets_u.tolist() if m is not None and not (isinstance(m, float) and pd.isna(m)) and str(m).strip()
+        ]
+        mi = column_index_from_string(HOME_TAB_UNIQUE_MARKET_COL)
+        for off in range(HOME_TAB_UNIQUE_MARKET_CLEAR_ROWS):
+            ws_home.cell(row=HOME_TAB_UNIQUE_MARKET_START_ROW + off, column=mi, value=None)
+        for i, market in enumerate(markets_u):
+            ws_home.cell(row=HOME_TAB_UNIQUE_MARKET_START_ROW + i, column=mi, value=market)
+        log.info(
+            "Home Tab: wrote %d unique Market value(s) to %s%s onward",
+            len(markets_u),
+            HOME_TAB_UNIQUE_MARKET_COL,
+            HOME_TAB_UNIQUE_MARKET_START_ROW,
+        )
+
+        write_capex_sheet_ak_from_proj(wb[CAPEX_SHEET_NAME], extractions_proj)
+
+    if extractions_proj is not None and not extractions_proj.empty:
+        ws_rev = wb[CANNIBAL_REV_SHEET_NAME] if CANNIBAL_REV_SHEET_NAME in wb.sheetnames else None
+        if ws_rev is None:
+            log.warning("%s sheet missing — GP %% will not be written", CANNIBAL_REV_SHEET_NAME)
+        write_cannibal_sheet_from_proj(
+            wb[CANNIBAL_SHEET_NAME],
+            extractions,
+            extractions_proj,
+            ws_rev=ws_rev,
+        )
 
 
 def npl_output_name(source_filename: str) -> str:

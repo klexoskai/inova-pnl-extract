@@ -28,6 +28,7 @@ SKU_FEATURE_FIELDS: list[tuple[str, str, str]] = [
     ("GTN_perc excluding Launch yr one-time costs", "C16", "AI27"),
     ("COGS/unit", "C69", "AI80"),
     ("Launch Yr one-time cost (Listing fees, launch COOP)", "C30", "AI41"),
+    ("launch_year_Q", "C155", "AI165"),
     ("forecast_net_sales_y1", "HD2", "IJ15"),
     ("forecast_net_sales_y2", "HD17", "IJ30"),
     ("forecast_net_sales_y3", "HD32", "IJ45"),

@@ -5,13 +5,16 @@ This document describes what the pipeline **reads** from old-format P&L workbook
 ## Overview
 
 ```text
-old_format/*.xlsm  ──extract──►  extractions.csv          ──insert──►  *_NPL.xlsm
-              │                  extractions_proj.csv              (copy of V2.1 template)
+old_format/*.xlsm  ──preflight──►  pnl_readiness_report.csv   (optional; no _NPL)
+              │
+              ├──extract──►  extractions.csv          ──insert──►  *_NPL.xlsm
+              │              extractions_proj.csv              (copy of V2.1 template)
               └── error_extraction.csv (failures)
 ```
 
 | Stage | Script / entry point | Output |
 |--------|----------------------|--------|
+| Pre-flight | `scripts/report_pnl_readiness.py` | `pnl_readiness_report.csv` (`filename`, `can_process`, `notes`) |
 | Extract (SKU) | `scripts/extract_old_format_pnl.py` | `extractions.csv` |
 | Extract (project) | same | `extractions_proj.csv` |
 | Insert | `scripts/apply_new_format_insertions.py` or `PandL_mastersku_extract.ipynb` | `<source_stem>_NPL.xlsm` |
@@ -60,6 +63,7 @@ Each field is read from a fixed rectangle on Project Summary and looked up by `(
 | `GTN_perc excluding Launch yr one-time costs` | `C16:AI27` |
 | `COGS/unit` | `C69:AI80` |
 | `Launch Yr one-time cost (Listing fees, launch COOP)` | `C30:AI41` |
+| `launch_year_Q` | `C155:AI165` |
 | `forecast_net_sales_y1` … `y5` | `HD2:IJ15`, `HD17:IJ30`, `HD32:IJ45`, `HD47:IJ58`, `HD62:IJ73` |
 | `launchyr_coop_listingfees_y1` … `y3` | `FV2:HB15`, `FV17:HB30`, `FV32:HB45` |
 | `other_COGS_y1` … `y5` | `JT2:KZ13`, `JT17:KZ28`, … `JT62:KZ73` |
@@ -91,7 +95,7 @@ These are present in `extractions.csv` for analysis or future insertions: net sa
 
 #### `launch_year_Q` (insertion dependency)
 
-**Not** produced by `extract_sku.py` today. Required for **Actual Launch Year (K)** and **Actual Launch Month (L)** on sku-block sheets. Add manually or via notebook logic (e.g. `2026 Q1`). Parsed as:
+Extracted from **Project Summary** `C155:AI165` (per SKU × market). Required for **Actual Launch Year (K)** and **Actual Launch Month (L)** on sku-block sheets (including **VOL_Auto**). Example values: `2026 Q1`, `2025 Q3`. Parsed as:
 
 - **K** = 4-digit year  
 - **L** = first month of quarter (Q1→January, Q2→April, Q3→July, Q4→October)
@@ -114,7 +118,9 @@ Aggregation columns are excluded: `CANZ`, `Asia Direct`, `Asia Total`, `Europe T
 | `Market` | From list-price active columns | |
 | `ANP_perc of Net Sales_Year 1` … `Year 5` | `C134:AI140` | Pivoted from row labels in col A |
 | `Incr Opex (Submissions, FTE etc.)_Year 1` … | `C147:AI152` | Merged on Market |
-| `CAPEX_Year 1` … | `C134:AI145` rows from row 6 onward | CAPEX block only |
+| `CAPEX_*` | `C134:AI145` rows from row 6 onward | Pivoted CAPEX block; CSV column is often **`CAPEX_CAPEX $`** (depends on Excel row labels in col A) |
+| `canni_perc_y1` … `canni_perc_y5` | **D274:AI274** (market labels) + **D276:AI276** … **D280:AI280** (value rows) | One shared header row for all years |
+| `canni_GP_perc` | **D274:AI274** (market labels) + **D282:AI282** (values) | Same market header row as years |
 
 | Column | Source |
 |--------|--------|
@@ -143,7 +149,7 @@ Output file name: `<original_stem>_NPL.xlsm` (e.g. `Project.xlsm` → `Project_N
 
 ### 2.1 Layout convention — sku-block sheets
 
-Sheets: **SP**, **VOL_Auto**, **SALES_DED_TD**, **COGS**, **COGS_OTHER**, **SALES_DED_KA**.
+Sheets: **SP**, **VOL_Auto**, **SALES_DED_TD**, **COGS**, **COGS_OTHER**, **SALES_DED_KA**, plus **A&P ALLOC** (column **X** only uses this layout).
 
 | Concept | Value |
 |---------|--------|
@@ -154,25 +160,41 @@ Sheets: **SP**, **VOL_Auto**, **SALES_DED_TD**, **COGS**, **COGS_OTHER**, **SALE
 | Market column | **C** |
 | Rows within block | One row per market row in CSV for that product SKU |
 
-Before writing, market and value cells in the block range are cleared.
+Before writing, market and value cells in the block range are cleared (sku-block tabs clear **C** plus their value columns; **A&P ALLOC** clears column **X** rows 8–143 only).
 
 ### 2.2 Insertion map (implemented)
 
 | Sheet | Source column(s) | Target cell(s) | Notes |
 |-------|------------------|----------------|--------|
+| **Home Tab** | (fixed) | **C6** | Base currency set to **AUD** (replaces existing cell value) |
 | **Home Tab** | Unique `sku_name.1` | **J6** downward | Up to 10 SKUs |
 | **SP** | `list_price_AUD` | **AI** | Per market row |
 | **VOL_Auto** | `forecast_volume_y1` … `y5` | **AQ:AU** | One column per year |
 | **SALES_DED_TD** | `GTN_perc excluding Launch yr one-time costs` | **BA, BN, CA, CN, DA, DN** | Same value repeated on each row |
-| **COGS** | `COGS/unit` | **BA, BN, CA, CN, DA, DN** | Same repeat pattern |
+| **COGS** | `COGS/unit` | **AK** | Per market row at sku-block anchors (e.g. **AK8**, **AK9**) |
 | **COGS_OTHER** | `COGS_other_combined_y1` … `y5` | **AK:AO** | Requires `preproc_sku_extractions` |
 | **SALES_DED_KA** | `Launch Yr one-time cost (Listing fees, launch COOP)` | **AK** | |
+| **A&P ALLOC** | Unique `Market` per product SKU (`sku_name.1`), first-seen order within SKU | **X8**, **X9**, … then **X23**, **X24**, … | Same block geometry as column **C** on other sku sheets; **only column X** touched |
 | All sku-block sheets above | `launch_year_Q` | **K** (year), **L** (month name) | Only if column exists in CSV |
+| **Home Tab** | Unique `Market` from `extractions_proj` (first appearance in CSV) | **I19**, **I20**, … | Clears **I19:I98** then writes; omits blank/NaN; only when project CSV has ANP rows |
 | **A&P TABLE** | `Market`, `ANP_perc of Net Sales_Year 1` … `Year 5` | **B4:G…** | From `extractions_proj`; one row per market |
+| **CAPEX** | `CAPEX_CAPEX $` | **AK8**, **AK9**, … | From `extractions_proj`; **consecutive** rows (not sku-block stepped); clears **AK8:AK127** first |
+| **CANNIBAL** | `canni_perc_y1` … `y5` | **BA/BB/BC/BD/BE** at sku blocks | Year columns that feed **CANNIBAL_REV** `GA:GE` |
+| **CANNIBAL_REV** | `canni_GP_perc` | **AI** (same row as market on **CANNIBAL**) | GP multiplier in `GA8`…`GE8` formulas (`*$AI8`) |
 
-**Not inserted today:** Incr Opex, CAPEX (present in `extractions_proj` but not written to template).
+**Not inserted today:** Incr Opex columns (present in `extractions_proj` but not written to template).
 
-### 2.3 CLI — insert
+### 2.3 Pre-flight report (no _NPL output)
+
+```bash
+python scripts/report_pnl_readiness.py \
+  --input-dir /path/to/pnl-data/old_format \
+  --output pnl_readiness_report.csv
+```
+
+Writes **`pnl_readiness_report.csv`**: `filename`, `can_process` (`yes`/`no`), `notes` (automated issues/warnings for finance to extend). Runs SKU + project extraction and, by default, an in-memory insertion dry-run against the master template. Use `--extract-only` for a faster extract-only check.
+
+### 2.4 CLI — insert
 
 ```bash
 python scripts/apply_new_format_insertions.py \
